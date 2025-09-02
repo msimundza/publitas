@@ -1,0 +1,18 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+canvas {
+  border: 1px solid red;
+}
+
+.caption {
+  margin-top: 0.5rem;
+  font-size: 1rem;
+  color: rgba(34, 32, 32, 0.6);
+  display: flex;
+  justify-content: center;
+}
