@@ -1,46 +1,65 @@
-import { useEffect, useRef } from 'react';
+import { useRef, useEffect } from 'react';
 
-export function useImageSlider(imageUrls, width, height) {
+export const useImageSlider = (images, width, height) => {
   const canvasRef = useRef(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    const imageCache = new Array(imageUrls.length).fill(null);
+    const context = canvas.getContext('2d');
+    const imageCache = new Array(images.length).fill(null);
     const loading = new Set();
+    const failed = new Set();
 
     let scrollOffset = 0;
     let isDragging = false;
     let dragStartX = 0;
-    let dragStartScroll = 0;
+    let dragStartOffset = 0;
+    let animationFrameId = null;
 
-    function prepImg(img) {
-      const scale = Math.min(width / img.width, height / img.height);
-      const drawWidth = img.width * scale;
-      const drawHeight = img.height * scale;
-      const x = (width - drawWidth) / 2;
-      const y = (height - drawHeight) / 2;
-      return { img, drawWidth, drawHeight, x, y };
+    function getPreparedImage(img) {
+      const canvasRatio = width / height;
+      const imageRatio = img.width / img.height;
+      let newWidth, newHeight;
+
+      if (imageRatio > canvasRatio) {
+        newWidth = width;
+        newHeight = width / imageRatio;
+      } else {
+        newHeight = height;
+        newWidth = height * imageRatio;
+      }
+
+      const x = (width - newWidth) / 2;
+      const y = (height - newHeight) / 2;
+
+      return { img, x, y, newWidth, newHeight };
     }
 
     function loadImage(index) {
-      if (index < 0 || index >= imageUrls.length || imageCache[index] || loading.has(index)) {
-        return;
-      }
-      loading.add(index);
+      if (index < 0 || index >= images.length || imageCache[index] || loading.has(index) || failed.has(index)) return;
       const img = new Image();
+
+      if (/^https?:\/\//.test(images[index])) {
+        img.crossOrigin = 'anonymous';
+      }
+
+      loading.add(index);
       img.onload = () => {
-        imageCache[index] = prepImg(img);
+        console.log('Image loaded:', images[index]);
+        imageCache[index] = getPreparedImage(img);
         loading.delete(index);
         draw();
       };
-      img.src = imageUrls[index];
+      img.onerror = () => {
+        console.error('Failed to load image:', images[index]);
+        failed.add(index);
+        loading.delete(index);
+      };
+      img.src = images[index];
     }
 
     function draw() {
-      ctx.clearRect(0, 0, width, height);
+      context.clearRect(0, 0, width, height);
       const currentIndex = Math.floor(scrollOffset / width);
 
       // preload one step ahead if user has started dragging past 10%
@@ -48,20 +67,25 @@ export function useImageSlider(imageUrls, width, height) {
       if (progress > 0.1) loadImage(currentIndex + 2);
 
       [currentIndex, currentIndex + 1].forEach((i) => {
-        if (i < 0 || i >= imageUrls.length) return;
+        if (i < 0 || i >= images.length) return;
         const slideX = i * width - scrollOffset;
         const p = imageCache[i];
-        ctx.save();
-        ctx.translate(slideX, 0);
+        context.save();
+        context.translate(slideX, 0);
         if (p) {
-          ctx.drawImage(p.img, p.x, p.y, p.drawWidth, p.drawHeight);
+          context.drawImage(p.img, p.x, p.y, p.newWidth, p.newHeight);
+        } else if (failed.has(i)) {
+          context.fillStyle = '#f00';
+          context.fillRect(0, 0, width, height);
+          context.fillStyle = '#fff';
+          context.fillText('Failed to load', width / 2, height / 2);
         } else {
-          ctx.fillStyle = '#888';
-          ctx.fillRect(0, 0, width, height);
-          ctx.fillStyle = '#fff';
-          ctx.fillText('Loading...', width / 2, height / 2);
+          context.fillStyle = '#888';
+          context.fillRect(0, 0, width, height);
+          context.fillStyle = '#fff';
+          context.fillText('Loading...', width / 2, height / 2);
         }
-        ctx.restore();
+        context.restore();
       });
     }
 
@@ -69,16 +93,25 @@ export function useImageSlider(imageUrls, width, height) {
       isDragging = true;
       canvas.style.cursor = 'grabbing';
       dragStartX = e.clientX;
-      dragStartScroll = scrollOffset;
+      dragStartOffset = scrollOffset;
     }
 
     function onPointerMove(e) {
       if (!isDragging) return;
-      const dx = e.clientX - dragStartX;
-      scrollOffset = dragStartScroll - dx;
-      const maxScroll = (imageUrls.length - 1) * width;
-      scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
-      draw();
+      const deltaX = e.clientX - dragStartX;
+      scrollOffset = dragStartOffset - deltaX;
+
+      // ensure we r within bounds
+      const maxScroll = (images.length - 1) * width;
+      if (scrollOffset < 0) scrollOffset = 0;
+      if (scrollOffset > maxScroll) scrollOffset = maxScroll;
+
+      if (!animationFrameId) {
+        animationFrameId = window.requestAnimationFrame(() => {
+          draw();
+          animationFrameId = null;
+        });
+      }
     }
 
     function onPointerUp() {
@@ -86,20 +119,19 @@ export function useImageSlider(imageUrls, width, height) {
       canvas.style.cursor = 'grab';
     }
 
+    loadImage(0);
+    loadImage(1);
+
     canvas.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
-
-    // load first two
-    loadImage(0);
-    loadImage(1);
 
     return () => {
       canvas.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
     };
-  }, [canvasRef, imageUrls, width, height]);
+  }, [images, width, height]);
 
-  return canvasRef;
-}
+  return { canvasRef };
+};
